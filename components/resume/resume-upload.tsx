@@ -4,6 +4,7 @@ import * as React from "react";
 import { UploadCloud, FileText, CheckCircle2, AlertCircle, X, FileCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { toast } from "@/components/ui/toast";
 import { formatFileSize } from "@/lib/utils/formatters";
 import type { ParsedCV } from "@/types/resume";
 import type { ParseCvApiResponse } from "@/types/api";
@@ -69,6 +70,7 @@ export function ResumeUpload({ onParsed, isLoading, setIsLoading }: ResumeUpload
 
     setIsLoading(true);
     setErrorMessage(null);
+    toast.info("Extracting document text and structuring CV with AI...", "Parsing Started");
 
     try {
       const formData = new FormData();
@@ -88,6 +90,7 @@ export function ResumeUpload({ onParsed, isLoading, setIsLoading }: ResumeUpload
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error parsing CV";
       setErrorMessage(msg);
+      toast.error(msg, "Extraction Failed");
     } finally {
       setIsLoading(false);
     }

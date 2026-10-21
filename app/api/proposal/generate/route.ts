@@ -46,9 +46,10 @@ export async function POST(req: NextRequest) {
 
     const fullSystemPrompt = `${systemPromptBase}\n\n${PROPOSAL_OUTPUT_SCHEMA_PROMPT}`;
 
-    // Sanitize user inputs
-    const sanitizedRequirements = sanitizeUntrustedInput(input.projectRequirements, 20000);
-    const sanitizedAdditional = sanitizeUntrustedInput(input.additionalInstructions || "", 5000);
+    // Sanitize user inputs and compact whitespace for rapid token generation
+    const compactedReq = input.projectRequirements.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    const sanitizedRequirements = sanitizeUntrustedInput(compactedReq, 12000);
+    const sanitizedAdditional = sanitizeUntrustedInput(input.additionalInstructions || "", 3000);
 
     const userPromptPayload = {
       projectRequirements: sanitizedRequirements,
@@ -70,9 +71,9 @@ export async function POST(req: NextRequest) {
 
     const generatedProposal = await callAIWithJsonOutput<ProposalOutput>({
       systemPrompt: fullSystemPrompt,
-      userPrompt: `Generate a proposal for the following parameters:\n\n${JSON.stringify(userPromptPayload, null, 2)}`,
+      userPrompt: `Generate a proposal for the following parameters:\n\n${JSON.stringify(userPromptPayload)}`,
       temperature: 0.3,
-      maxTokens: 4000,
+      maxTokens: 3500,
     });
 
     // Validate structured output

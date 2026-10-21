@@ -4,6 +4,7 @@ import * as React from "react";
 import { Download, LayoutTemplate, AlertCircle, CheckCircle2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { toast } from "@/components/ui/toast";
 import type { ParsedCV, ResumeTemplateId } from "@/types/resume";
 
 interface ResumePreviewProps {
@@ -41,9 +42,11 @@ export function ResumePreview({ cv }: ResumePreviewProps) {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      toast.success("Resume PDF downloaded successfully!", "Download Complete");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error exporting PDF";
       setExportError(msg);
+      toast.error(msg, "Export Failed");
     } finally {
       setIsExporting(false);
     }

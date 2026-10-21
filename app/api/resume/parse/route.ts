@@ -93,12 +93,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 7. Structure the extracted text using AI
-    const sanitizedCVText = sanitizeUntrustedInput(extractedText, 25000);
+    // 7. Structure the extracted text using AI (compact whitespace to optimize token latency and speed)
+    const compactedText = extractedText.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    const sanitizedCVText = sanitizeUntrustedInput(compactedText, 15000);
     const parsedCV = await callAIWithJsonOutput<ParsedCV>({
       systemPrompt: RESUME_PARSE_SYSTEM_PROMPT,
       userPrompt: `Extract structured data from this CV text:\n\n${sanitizedCVText}`,
       temperature: 0.1,
+      maxTokens: 2500,
     });
 
     // 8. Validate against Zod schema

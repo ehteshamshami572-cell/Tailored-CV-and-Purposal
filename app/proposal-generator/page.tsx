@@ -1,14 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { Send, ArrowLeft, RotateCcw, Sparkles, SlidersHorizontal, Users, User } from "lucide-react";
+import { Send, ArrowLeft, RotateCcw, Sparkles, SlidersHorizontal, Users, User, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/toast";
 import { ProposalForm } from "@/components/proposal/proposal-form";
 import { ProposalEditor } from "@/components/proposal/proposal-editor";
 import { ProposalPreview } from "@/components/proposal/proposal-preview";
+import { ProposalGeneratingSkeleton } from "@/components/proposal/proposal-skeleton";
 import type { ProposalInput, ProposalOutput } from "@/types/proposal";
+
+const PROPOSAL_STORAGE_KEY = "craftforge_proposal_state";
 
 export default function ProposalGeneratorPage() {
   const [view, setView] = React.useState<"form" | "result">("form");
@@ -19,11 +23,52 @@ export default function ProposalGeneratorPage() {
   const [currentInput, setCurrentInput] = React.useState<ProposalInput | null>(null);
   const [generatedProposal, setGeneratedProposal] = React.useState<ProposalOutput | null>(null);
   const [activeTab, setActiveTab] = React.useState("preview");
+  const [isInitialized, setIsInitialized] = React.useState(false);
+
+  // 1. Restore state from localStorage so data is not lost on reload
+  React.useEffect(() => {
+    try {
+      const saved = localStorage.getItem(PROPOSAL_STORAGE_KEY);
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data.currentInput) setCurrentInput(data.currentInput);
+        if (data.generatedProposal) setGeneratedProposal(data.generatedProposal);
+        if (data.view) setView(data.view);
+        if (data.activeTab) setActiveTab(data.activeTab);
+      }
+    } catch (e) {
+      console.warn("Failed to restore proposal state:", e);
+    } finally {
+      setIsInitialized(true);
+    }
+  }, []);
+
+  // 2. Persist state to localStorage on update
+  React.useEffect(() => {
+    if (!isInitialized) return;
+
+    if (currentInput || generatedProposal) {
+      try {
+        localStorage.setItem(
+          PROPOSAL_STORAGE_KEY,
+          JSON.stringify({
+            view,
+            currentInput,
+            generatedProposal,
+            activeTab,
+          })
+        );
+      } catch (e) {
+        console.warn("Failed to persist proposal state:", e);
+      }
+    }
+  }, [isInitialized, view, currentInput, generatedProposal, activeTab]);
 
   const handleGenerate = async (input: ProposalInput) => {
     setIsLoading(true);
     setErrorMessage(null);
     setCurrentInput(input);
+    toast.info("Generating tailored proposal with AI...", "Proposal Generation");
 
     try {
       const res = await fetch("/api/proposal/generate", {
@@ -39,9 +84,11 @@ export default function ProposalGeneratorPage() {
 
       setGeneratedProposal(json.data.proposal);
       setView("result");
+      toast.success("Proposal generated successfully!", "Success");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error generating proposal";
       setErrorMessage(msg);
+      toast.error(msg, "Generation Error");
     } finally {
       setIsLoading(false);
     }
@@ -53,10 +100,21 @@ export default function ProposalGeneratorPage() {
     }
   };
 
+  const handleClearSession = () => {
+    try {
+      localStorage.removeItem(PROPOSAL_STORAGE_KEY);
+    } catch {}
+    setCurrentInput(null);
+    setGeneratedProposal(null);
+    setView("form");
+    toast.info("Proposal session reset. You can start a new proposal.");
+  };
+
   const handleRegenerateSection = async (sectionId: string) => {
     if (!generatedProposal || !currentInput) return;
 
-    // We can regenerate the specific section while preserving all other user edits!
+    toast.info("Regenerating section with AI...");
+
     try {
       const targetSec = generatedProposal.sections.find((s) => s.id === sectionId);
       if (!targetSec) return;
@@ -74,19 +132,22 @@ export default function ProposalGeneratorPage() {
 
       const json = await res.json();
       if (res.ok && json.success && json.data.proposal.sections) {
-        const matchingSection = json.data.proposal.sections.find(
-          (s: any) => s.title.toLowerCase() === targetSec.title.toLowerCase()
-        ) || json.data.proposal.sections[0];
+        const matchingSection =
+          json.data.proposal.sections.find(
+            (s: any) => s.title.toLowerCase() === targetSec.title.toLowerCase()
+          ) || json.data.proposal.sections[0];
 
         if (matchingSection) {
           const updatedSections = generatedProposal.sections.map((s) =>
             s.id === sectionId ? { ...s, content: matchingSection.content } : s
           );
           setGeneratedProposal({ ...generatedProposal, sections: updatedSections });
+          toast.success(`Section "${targetSec.title}" regenerated successfully!`);
         }
       }
     } catch (err) {
       console.error("Failed to regenerate section:", err);
+      toast.error("Failed to regenerate section.");
     }
   };
 
@@ -106,36 +167,55 @@ export default function ProposalGeneratorPage() {
           </p>
         </div>
 
-        {view === "result" && generatedProposal && (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          {generatedProposal && (
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
-              onClick={() => setView("form")}
-              className="text-xs gap-1.5"
+              onClick={handleClearSession}
+              className="text-xs h-7 text-muted-foreground hover:text-destructive gap-1"
+              title="Clear stored data and start over"
             >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Tweak Scope &amp; Parameters
+              <Trash2 className="h-3 w-3" />
+              <span>Clear &amp; New</span>
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleRegenerateProposal}
-              isLoading={isLoading}
-              disabled={isLoading}
-              className="text-xs gap-1.5"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Regenerate All
-            </Button>
-          </div>
-        )}
+          )}
+
+          {view === "result" && generatedProposal && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setView("form")}
+                className="text-xs gap-1.5"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                Tweak Scope
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleRegenerateProposal}
+                isLoading={isLoading}
+                disabled={isLoading}
+                className="text-xs gap-1.5"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Regenerate All
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
+      {/* Loading Skeleton */}
+      {isLoading && <ProposalGeneratingSkeleton />}
+
       {/* View 1: Form */}
-      {view === "form" && (
+      {!isLoading && view === "form" && (
         <ProposalForm
           onSubmit={handleGenerate}
           isLoading={isLoading}
@@ -145,7 +225,7 @@ export default function ProposalGeneratorPage() {
       )}
 
       {/* View 2: Result Preview & Editor */}
-      {view === "result" && generatedProposal && (
+      {!isLoading && view === "result" && generatedProposal && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20">
             <div className="flex items-center gap-3">
@@ -163,7 +243,7 @@ export default function ProposalGeneratorPage() {
                   <span className="font-semibold text-foreground uppercase">
                     {generatedProposal.applicantType}
                   </span>{" "}
-                  mode • Ready for client submission &amp; PDF download
+                  mode • Saved in browser session
                 </p>
               </div>
             </div>
@@ -190,7 +270,10 @@ export default function ProposalGeneratorPage() {
             <TabsContent value="editor" className="pt-4">
               <ProposalEditor
                 proposal={generatedProposal}
-                onChange={setGeneratedProposal}
+                onChange={(updated) => {
+                  setGeneratedProposal(updated);
+                  toast.info("Proposal updated in preview.");
+                }}
                 onRegenerateSection={handleRegenerateSection}
               />
             </TabsContent>

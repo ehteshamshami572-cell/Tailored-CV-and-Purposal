@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "@/components/ui/toast";
 import type { ParsedCV } from "@/types/resume";
 
 interface TailoredCvEditorProps {
@@ -37,6 +38,7 @@ export function TailoredCvEditor({ cv, originalCV, onChange }: TailoredCvEditorP
   // Restore summary
   const restoreSummary = () => {
     onChange({ ...cv, professionalSummary: originalCV.professionalSummary });
+    toast.info("Original summary restored.");
   };
 
   // Skills management
@@ -45,16 +47,20 @@ export function TailoredCvEditor({ cv, originalCV, onChange }: TailoredCvEditorP
     if (trimmed && !cv.skills.includes(trimmed)) {
       onChange({ ...cv, skills: [...cv.skills, trimmed] });
       setNewSkill("");
+      toast.success(`Skill "${trimmed}" added.`);
     }
   };
 
   const removeSkill = (index: number) => {
+    const skillName = cv.skills[index];
     const updated = cv.skills.filter((_, i) => i !== index);
     onChange({ ...cv, skills: updated });
+    toast.info(`Skill "${skillName}" removed.`);
   };
 
   const restoreSkills = () => {
     onChange({ ...cv, skills: [...originalCV.skills] });
+    toast.info("Original skills restored.");
   };
 
   // Experience updates
@@ -73,6 +79,7 @@ export function TailoredCvEditor({ cv, originalCV, onChange }: TailoredCvEditorP
       bullets: [...newExp[expIdx].bullets, "Delivered measurable results by..."],
     };
     onChange({ ...cv, experience: newExp });
+    toast.info("New bullet point added.");
   };
 
   const removeExpBullet = (expIdx: number, bulletIdx: number) => {
@@ -82,10 +89,12 @@ export function TailoredCvEditor({ cv, originalCV, onChange }: TailoredCvEditorP
       bullets: newExp[expIdx].bullets.filter((_, i) => i !== bulletIdx),
     };
     onChange({ ...cv, experience: newExp });
+    toast.info("Bullet point removed.");
   };
 
   const restoreExperience = () => {
     onChange({ ...cv, experience: JSON.parse(JSON.stringify(originalCV.experience)) });
+    toast.info("Original work experience restored.");
   };
 
   return (

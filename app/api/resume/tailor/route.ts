@@ -41,21 +41,25 @@ export async function POST(req: NextRequest) {
 
     const { parsedCV, jobDescription, targetJobTitle, companyName } = parseResult.data;
 
-    // 3. Build sanitized prompt payload
-    const sanitizedJD = sanitizeUntrustedInput(jobDescription, 15000);
+    // 3. Build sanitized prompt payload (strip rawText to minimize token latency and speed up completion)
+    const { rawText: _, ...cleanCvForAI } = parsedCV;
+    const sanitizedJD = sanitizeUntrustedInput(
+      jobDescription.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim(),
+      10000
+    );
     const userPromptPayload = {
       targetJobTitle: targetJobTitle || "Not specified",
       companyName: companyName || "Not specified",
       jobDescription: sanitizedJD,
-      candidateCV: parsedCV,
+      candidateCV: cleanCvForAI,
     };
 
-    // 4. Execute AI tailoring
+    // 4. Execute AI tailoring with optimized token limits
     const result = await callAIWithJsonOutput<TailoredResumeResult>({
       systemPrompt: RESUME_TAILOR_SYSTEM_PROMPT,
-      userPrompt: `Target Job Context and Candidate Data:\n\n${JSON.stringify(userPromptPayload, null, 2)}`,
+      userPrompt: `Target Job Context and Candidate Data:\n\n${JSON.stringify(userPromptPayload)}`,
       temperature: 0.2,
-      maxTokens: 4000,
+      maxTokens: 3500,
     });
 
     // 5. Schema validation of AI output
