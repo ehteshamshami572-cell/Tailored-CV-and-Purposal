@@ -1,5 +1,6 @@
 import { PDFDocument, rgb, StandardFonts, PDFPage, PDFFont } from "pdf-lib";
 import type { ParsedCV, ResumeTemplateId } from "@/types/resume";
+import { sanitizeForPdf } from "./sanitize-pdf-text";
 
 interface PageContext {
   doc: PDFDocument;
@@ -17,7 +18,7 @@ interface PageContext {
 }
 
 export async function generateResumePdf(
-  cv: ParsedCV,
+  rawCv: ParsedCV,
   templateId: ResumeTemplateId = "ats-classic"
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -70,25 +71,101 @@ export async function generateResumePdf(
     }
   }
 
-  // Text wrapper
+  // Safe drawText helper that guarantees WinAnsi compatibility (fixes 0x2011 and Unicode errors)
+  function drawText(
+    text: string,
+    options: {
+      x: number;
+      y: number;
+      size: number;
+      font: PDFFont;
+      color?: ReturnType<typeof rgb>;
+    }
+  ) {
+    const clean = sanitizeForPdf(text, options.font);
+    ctx.page.drawText(clean, options);
+  }
+
+  // Safe measure text helper
+  function measureText(text: string, font: PDFFont, size: number): number {
+    const clean = sanitizeForPdf(text, font);
+    return font.widthOfTextAtSize(clean, size);
+  }
+
+  // Text wrapper with WinAnsi sanitization
   function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: number): string[] {
-    const words = text.split(" ");
+    const cleanText = sanitizeForPdf(text, font);
+    const words = cleanText.split(" ");
     const lines: string[] = [];
     let currentLine = "";
 
     for (const word of words) {
       const candidate = currentLine ? `${currentLine} ${word}` : word;
-      const lineWidth = font.widthOfTextAtSize(candidate, fontSize);
+      const cleanCandidate = sanitizeForPdf(candidate, font);
+      const lineWidth = measureText(cleanCandidate, font, fontSize);
       if (lineWidth <= maxWidth) {
-        currentLine = candidate;
+        currentLine = cleanCandidate;
       } else {
         if (currentLine) lines.push(currentLine);
-        currentLine = word;
+        currentLine = sanitizeForPdf(word, font);
       }
     }
     if (currentLine) lines.push(currentLine);
     return lines;
   }
+
+  // Deep sanitize all CV fields
+  const cv: ParsedCV = {
+    contact: {
+      fullName: sanitizeForPdf(rawCv.contact?.fullName || "", fontBold),
+      email: sanitizeForPdf(rawCv.contact?.email || "", fontRegular),
+      phone: sanitizeForPdf(rawCv.contact?.phone || "", fontRegular),
+      location: sanitizeForPdf(rawCv.contact?.location || "", fontRegular),
+      linkedinUrl: sanitizeForPdf(rawCv.contact?.linkedinUrl || "", fontRegular),
+      portfolioUrl: sanitizeForPdf(rawCv.contact?.portfolioUrl || "", fontRegular),
+      githubUrl: sanitizeForPdf(rawCv.contact?.githubUrl || "", fontRegular),
+    },
+    professionalSummary: sanitizeForPdf(rawCv.professionalSummary || "", fontRegular),
+    skills: (rawCv.skills || []).map((s) => sanitizeForPdf(s, fontRegular)),
+    experience: (rawCv.experience || []).map((exp) => ({
+      ...exp,
+      jobTitle: sanitizeForPdf(exp.jobTitle || "", fontBold),
+      employer: sanitizeForPdf(exp.employer || "", fontItalic),
+      location: sanitizeForPdf(exp.location || "", fontItalic),
+      startDate: sanitizeForPdf(exp.startDate || "", fontItalic),
+      endDate: sanitizeForPdf(exp.endDate || "", fontItalic),
+      bullets: (exp.bullets || []).map((b) => sanitizeForPdf(b, fontRegular)),
+    })),
+    education: (rawCv.education || []).map((edu) => ({
+      ...edu,
+      institution: sanitizeForPdf(edu.institution || "", fontItalic),
+      degree: sanitizeForPdf(edu.degree || "", fontBold),
+      fieldOfStudy: sanitizeForPdf(edu.fieldOfStudy || "", fontBold),
+      graduationDate: sanitizeForPdf(edu.graduationDate || "", fontItalic),
+      gpa: sanitizeForPdf(edu.gpa || "", fontItalic),
+      achievements: (edu.achievements || []).map((a) => sanitizeForPdf(a, fontRegular)),
+    })),
+    certifications: (rawCv.certifications || []).map((cert) => ({
+      ...cert,
+      name: sanitizeForPdf(cert.name || "", fontBold),
+      issuer: sanitizeForPdf(cert.issuer || "", fontRegular),
+      date: sanitizeForPdf(cert.date || "", fontRegular),
+      url: sanitizeForPdf(cert.url || "", fontRegular),
+    })),
+    projects: (rawCv.projects || []).map((proj) => ({
+      ...proj,
+      name: sanitizeForPdf(proj.name || "", fontBold),
+      description: sanitizeForPdf(proj.description || "", fontRegular),
+      url: sanitizeForPdf(proj.url || "", fontRegular),
+      bullets: (proj.bullets || []).map((b) => sanitizeForPdf(b, fontRegular)),
+      technologies: (proj.technologies || []).map((t) => sanitizeForPdf(t, fontRegular)),
+    })),
+    additionalSections: (rawCv.additionalSections || []).map((sec) => ({
+      ...sec,
+      heading: sanitizeForPdf(sec.heading || "", fontBold),
+      items: (sec.items || []).map((item) => sanitizeForPdf(item, fontRegular)),
+    })),
+  };
 
   // Render header
   const printableWidth = ctx.width - ctx.margin * 2;
@@ -96,7 +173,7 @@ export async function generateResumePdf(
   const nameSize = 20;
   ensureSpace(nameSize + 25);
 
-  ctx.page.drawText(name, {
+  drawText(name, {
     x: ctx.margin,
     y: ctx.y - nameSize,
     size: nameSize,
@@ -119,7 +196,7 @@ export async function generateResumePdf(
     const contactLines = wrapText(contactString, ctx.fontRegular, 9, printableWidth);
     for (const line of contactLines) {
       ensureSpace(12);
-      ctx.page.drawText(line, {
+      drawText(line, {
         x: ctx.margin,
         y: ctx.y - 9,
         size: 9,
@@ -145,7 +222,7 @@ export async function generateResumePdf(
   // Helper for Section Titles
   function drawSectionHeader(title: string) {
     ensureSpace(24);
-    ctx.page.drawText(title.toUpperCase(), {
+    drawText(title.toUpperCase(), {
       x: ctx.margin,
       y: ctx.y - 12,
       size: 11,
@@ -169,7 +246,7 @@ export async function generateResumePdf(
     const summaryLines = wrapText(cv.professionalSummary.trim(), ctx.fontRegular, 9.5, printableWidth);
     for (const line of summaryLines) {
       ensureSpace(13);
-      ctx.page.drawText(line, {
+      drawText(line, {
         x: ctx.margin,
         y: ctx.y - 9.5,
         size: 9.5,
@@ -188,7 +265,7 @@ export async function generateResumePdf(
     const skillLines = wrapText(skillsText, ctx.fontRegular, 9.5, printableWidth);
     for (const line of skillLines) {
       ensureSpace(13);
-      ctx.page.drawText(line, {
+      drawText(line, {
         x: ctx.margin,
         y: ctx.y - 9.5,
         size: 9.5,
@@ -207,7 +284,7 @@ export async function generateResumePdf(
       ensureSpace(28);
 
       // Job Title and Date
-      ctx.page.drawText(exp.jobTitle, {
+      drawText(exp.jobTitle, {
         x: ctx.margin,
         y: ctx.y - 10,
         size: 10,
@@ -215,9 +292,9 @@ export async function generateResumePdf(
         color: ctx.textColor,
       });
 
-      const dateStr = `${exp.startDate} – ${exp.endDate}`;
-      const dateWidth = ctx.fontItalic.widthOfTextAtSize(dateStr, 9);
-      ctx.page.drawText(dateStr, {
+      const dateStr = `${exp.startDate} - ${exp.endDate}`;
+      const dateWidth = measureText(dateStr, ctx.fontItalic, 9);
+      drawText(dateStr, {
         x: ctx.width - ctx.margin - dateWidth,
         y: ctx.y - 10,
         size: 9,
@@ -228,7 +305,7 @@ export async function generateResumePdf(
 
       // Employer & Location
       const employerLine = exp.location ? `${exp.employer}  |  ${exp.location}` : exp.employer;
-      ctx.page.drawText(employerLine, {
+      drawText(employerLine, {
         x: ctx.margin,
         y: ctx.y - 9,
         size: 9,
@@ -245,7 +322,7 @@ export async function generateResumePdf(
             ensureSpace(12);
             if (i === 0) {
               // Bullet symbol
-              ctx.page.drawText("•", {
+              drawText("•", {
                 x: ctx.margin + 2,
                 y: ctx.y - 9,
                 size: 9,
@@ -253,7 +330,7 @@ export async function generateResumePdf(
                 color: ctx.primaryColor,
               });
             }
-            ctx.page.drawText(bulletLines[i], {
+            drawText(bulletLines[i], {
               x: ctx.margin + 12,
               y: ctx.y - 9,
               size: 9,
@@ -274,7 +351,7 @@ export async function generateResumePdf(
     for (const edu of cv.education) {
       ensureSpace(24);
       const degreeLine = edu.fieldOfStudy ? `${edu.degree} in ${edu.fieldOfStudy}` : edu.degree;
-      ctx.page.drawText(degreeLine, {
+      drawText(degreeLine, {
         x: ctx.margin,
         y: ctx.y - 10,
         size: 10,
@@ -283,8 +360,8 @@ export async function generateResumePdf(
       });
 
       if (edu.graduationDate) {
-        const dateWidth = ctx.fontItalic.widthOfTextAtSize(edu.graduationDate, 9);
-        ctx.page.drawText(edu.graduationDate, {
+        const dateWidth = measureText(edu.graduationDate, ctx.fontItalic, 9);
+        drawText(edu.graduationDate, {
           x: ctx.width - ctx.margin - dateWidth,
           y: ctx.y - 10,
           size: 9,
@@ -295,7 +372,7 @@ export async function generateResumePdf(
       ctx.y -= 13;
 
       const instLine = edu.gpa ? `${edu.institution}  (GPA: ${edu.gpa})` : edu.institution;
-      ctx.page.drawText(instLine, {
+      drawText(instLine, {
         x: ctx.margin,
         y: ctx.y - 9,
         size: 9,
@@ -311,8 +388,8 @@ export async function generateResumePdf(
     drawSectionHeader("Certifications");
     for (const cert of cv.certifications) {
       ensureSpace(16);
-      const certLine = cert.date ? `${cert.name} — ${cert.issuer} (${cert.date})` : `${cert.name} — ${cert.issuer}`;
-      ctx.page.drawText(`•  ${certLine}`, {
+      const certLine = cert.date ? `${cert.name} - ${cert.issuer} (${cert.date})` : `${cert.name} - ${cert.issuer}`;
+      drawText(`•  ${certLine}`, {
         x: ctx.margin,
         y: ctx.y - 9,
         size: 9,
@@ -329,7 +406,7 @@ export async function generateResumePdf(
     drawSectionHeader("Key Projects");
     for (const proj of cv.projects) {
       ensureSpace(22);
-      ctx.page.drawText(proj.name, {
+      drawText(proj.name, {
         x: ctx.margin,
         y: ctx.y - 10,
         size: 10,
@@ -337,8 +414,8 @@ export async function generateResumePdf(
         color: ctx.textColor,
       });
       if (proj.url) {
-        const urlWidth = ctx.fontRegular.widthOfTextAtSize(proj.url, 8.5);
-        ctx.page.drawText(proj.url, {
+        const urlWidth = measureText(proj.url, ctx.fontRegular, 8.5);
+        drawText(proj.url, {
           x: ctx.width - ctx.margin - urlWidth,
           y: ctx.y - 10,
           size: 8.5,
@@ -352,7 +429,7 @@ export async function generateResumePdf(
         const descLines = wrapText(proj.description, ctx.fontRegular, 9, printableWidth);
         for (const line of descLines) {
           ensureSpace(12);
-          ctx.page.drawText(line, {
+          drawText(line, {
             x: ctx.margin,
             y: ctx.y - 9,
             size: 9,
@@ -375,7 +452,7 @@ export async function generateResumePdf(
           const itemLines = wrapText(item, ctx.fontRegular, 9, printableWidth - 10);
           for (let i = 0; i < itemLines.length; i++) {
             ensureSpace(12);
-            ctx.page.drawText(i === 0 ? `•  ${itemLines[i]}` : `   ${itemLines[i]}`, {
+            drawText(i === 0 ? `•  ${itemLines[i]}` : `   ${itemLines[i]}`, {
               x: ctx.margin,
               y: ctx.y - 9,
               size: 9,
@@ -395,7 +472,7 @@ export async function generateResumePdf(
   for (let i = 0; i < totalPages; i++) {
     const page = doc.getPage(i);
     const pageNumberStr = `Page ${i + 1} of ${totalPages}`;
-    const pageNumberWidth = fontRegular.widthOfTextAtSize(pageNumberStr, 8);
+    const pageNumberWidth = measureText(pageNumberStr, fontRegular, 8);
     page.drawText(pageNumberStr, {
       x: width - margin - pageNumberWidth,
       y: margin / 2,

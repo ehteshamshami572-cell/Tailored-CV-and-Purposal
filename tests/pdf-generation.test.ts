@@ -152,4 +152,40 @@ describe("PDF Generation Engine Tests", () => {
     expect(pdfBytes.byteLength).toBeGreaterThan(1000);
     expect(Buffer.from(pdfBytes.slice(0, 5)).toString("ascii")).toBe("%PDF-");
   });
+
+  it("safely encodes non-breaking hyphens (0x2011) and tricky Unicode in CV and proposal PDFs", async () => {
+    const cvWithNonBreakingHyphens: ParsedCV = {
+      ...mockCV,
+      professionalSummary: "Hands\u2011on Architect specializing in end\u2011to\u2011end Next.js & AI.",
+      skills: ["Full\u2011Stack", "Client\u2011Side", "Real\u2011Time"],
+      experience: [
+        {
+          id: "exp-test",
+          jobTitle: "Lead Full\u2011Stack Dev",
+          employer: "Tech\u2011Corp Solutions",
+          startDate: "2021\u201101",
+          endDate: "2023\u201112",
+          bullets: [
+            "Delivered zero\u2011downtime deployment pipelines for e\u2011commerce platforms.",
+            "Special smart quotes: \u201CProduction\u201D and \u2018Speed\u2019 with emoji 🚀 and dash \u2011.",
+          ],
+        },
+      ],
+    };
+
+    const resumeBytes = await generateResumePdf(cvWithNonBreakingHyphens, "ats-classic");
+    expect(resumeBytes).toBeDefined();
+    expect(Buffer.from(resumeBytes.slice(0, 5)).toString("ascii")).toBe("%PDF-");
+
+    const proposalWithTrickyChars: ProposalOutput = {
+      ...mockProposal,
+      title: "End\u2011to\u2011End Solution Proposal",
+      executiveSummary: "Turn\u2011key implementation with 99.99% uptime guarantee \u2011 fully managed.",
+      deliverables: ["Cloud\u2011native architecture", "High\u2011throughput API"],
+    };
+
+    const propBytes = await generateProposalPdf(proposalWithTrickyChars, "modern-corp");
+    expect(propBytes).toBeDefined();
+    expect(Buffer.from(propBytes.slice(0, 5)).toString("ascii")).toBe("%PDF-");
+  });
 });

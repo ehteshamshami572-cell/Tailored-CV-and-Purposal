@@ -1,5 +1,6 @@
 import { PDFDocument, rgb, StandardFonts, PDFPage, PDFFont } from "pdf-lib";
 import type { ProposalOutput, ProposalTemplateId } from "@/types/proposal";
+import { sanitizeForPdf } from "./sanitize-pdf-text";
 
 interface PageContext {
   doc: PDFDocument;
@@ -18,7 +19,7 @@ interface PageContext {
 }
 
 export async function generateProposalPdf(
-  proposal: ProposalOutput,
+  rawProposal: ProposalOutput,
   templateId: ProposalTemplateId = "modern-corp"
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -71,24 +72,72 @@ export async function generateProposalPdf(
     }
   }
 
+  // Safe drawText helper that guarantees WinAnsi compatibility
+  function drawText(
+    text: string,
+    options: {
+      x: number;
+      y: number;
+      size: number;
+      font: PDFFont;
+      color?: ReturnType<typeof rgb>;
+    }
+  ) {
+    const clean = sanitizeForPdf(text, options.font);
+    ctx.page.drawText(clean, options);
+  }
+
+  // Safe measure text helper
+  function measureText(text: string, font: PDFFont, size: number): number {
+    const clean = sanitizeForPdf(text, font);
+    return font.widthOfTextAtSize(clean, size);
+  }
+
+  // Text wrapper with WinAnsi sanitization
   function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: number): string[] {
-    const words = text.split(" ");
+    const cleanText = sanitizeForPdf(text, font);
+    const words = cleanText.split(" ");
     const lines: string[] = [];
     let currentLine = "";
 
     for (const word of words) {
       const candidate = currentLine ? `${currentLine} ${word}` : word;
-      const lineWidth = font.widthOfTextAtSize(candidate, fontSize);
+      const cleanCandidate = sanitizeForPdf(candidate, font);
+      const lineWidth = measureText(cleanCandidate, font, fontSize);
       if (lineWidth <= maxWidth) {
-        currentLine = candidate;
+        currentLine = cleanCandidate;
       } else {
         if (currentLine) lines.push(currentLine);
-        currentLine = word;
+        currentLine = sanitizeForPdf(word, font);
       }
     }
     if (currentLine) lines.push(currentLine);
     return lines;
   }
+
+  // Deep sanitize proposal data
+  const proposal: ProposalOutput = {
+    ...rawProposal,
+    title: sanitizeForPdf(rawProposal.title || "", fontBold),
+    clientName: sanitizeForPdf(rawProposal.clientName || "", fontRegular),
+    applicantName: sanitizeForPdf(rawProposal.applicantName || "", fontRegular),
+    date: sanitizeForPdf(rawProposal.date || "", fontRegular),
+    executiveSummary: sanitizeForPdf(rawProposal.executiveSummary || "", fontRegular),
+    sections: (rawProposal.sections || []).map((sec) => ({
+      ...sec,
+      title: sanitizeForPdf(sec.title || "", fontBold),
+      content: sanitizeForPdf(sec.content || "", fontRegular),
+    })),
+    deliverables: (rawProposal.deliverables || []).map((d) => sanitizeForPdf(d, fontRegular)),
+    milestones: (rawProposal.milestones || []).map((m) => ({
+      ...m,
+      name: sanitizeForPdf(m.name || "", fontBold),
+      description: sanitizeForPdf(m.description || "", fontRegular),
+      estimatedDuration: sanitizeForPdf(m.estimatedDuration || "", fontItalic),
+    })),
+    pricingSummary: sanitizeForPdf(rawProposal.pricingSummary || "", fontRegular),
+    nextSteps: sanitizeForPdf(rawProposal.nextSteps || "", fontRegular),
+  };
 
   const printableWidth = ctx.width - ctx.margin * 2;
 
@@ -97,7 +146,7 @@ export async function generateProposalPdf(
   const titleSize = 22;
   const titleLines = wrapText(proposal.title, ctx.fontBold, titleSize, printableWidth);
   for (const tLine of titleLines) {
-    ctx.page.drawText(tLine, {
+    drawText(tLine, {
       x: ctx.margin,
       y: ctx.y - titleSize,
       size: titleSize,
@@ -112,7 +161,7 @@ export async function generateProposalPdf(
   ensureSpace(28);
   const applicantTypeLabel = proposal.applicantType === "agency" ? "AGENCY PROPOSAL" : "INDEPENDENT CONSULTANT PROPOSAL";
 
-  ctx.page.drawText(applicantTypeLabel, {
+  drawText(applicantTypeLabel, {
     x: ctx.margin,
     y: ctx.y - 10,
     size: 9,
@@ -121,8 +170,8 @@ export async function generateProposalPdf(
   });
 
   const dateText = `Date: ${proposal.date}`;
-  const dateWidth = ctx.fontRegular.widthOfTextAtSize(dateText, 9);
-  ctx.page.drawText(dateText, {
+  const dateWidth = measureText(dateText, ctx.fontRegular, 9);
+  drawText(dateText, {
     x: ctx.width - ctx.margin - dateWidth,
     y: ctx.y - 10,
     size: 9,
@@ -136,7 +185,7 @@ export async function generateProposalPdf(
   if (proposal.clientName) partyDetails.push(`Prepared for: ${proposal.clientName}`);
 
   if (partyDetails.length > 0) {
-    ctx.page.drawText(partyDetails.join("   |   "), {
+    drawText(partyDetails.join("   |   "), {
       x: ctx.margin,
       y: ctx.y - 9,
       size: 9.5,
@@ -158,7 +207,7 @@ export async function generateProposalPdf(
   // Helper for Section Titles
   function drawSectionHeader(title: string) {
     ensureSpace(28);
-    ctx.page.drawText(title, {
+    drawText(title, {
       x: ctx.margin,
       y: ctx.y - 13,
       size: 13,
@@ -182,7 +231,7 @@ export async function generateProposalPdf(
     const execLines = wrapText(proposal.executiveSummary, ctx.fontRegular, 10, printableWidth);
     for (const line of execLines) {
       ensureSpace(14);
-      ctx.page.drawText(line, {
+      drawText(line, {
         x: ctx.margin,
         y: ctx.y - 10,
         size: 10,
@@ -205,7 +254,7 @@ export async function generateProposalPdf(
           const paraLines = wrapText(para.trim(), ctx.fontRegular, 9.5, printableWidth);
           for (const line of paraLines) {
             ensureSpace(13);
-            ctx.page.drawText(line, {
+            drawText(line, {
               x: ctx.margin,
               y: ctx.y - 9.5,
               size: 9.5,
@@ -229,7 +278,7 @@ export async function generateProposalPdf(
       for (let i = 0; i < delLines.length; i++) {
         ensureSpace(13);
         if (i === 0) {
-          ctx.page.drawText("•", {
+          drawText("•", {
             x: ctx.margin + 2,
             y: ctx.y - 9.5,
             size: 9.5,
@@ -237,7 +286,7 @@ export async function generateProposalPdf(
             color: ctx.primaryColor,
           });
         }
-        ctx.page.drawText(delLines[i], {
+        drawText(delLines[i], {
           x: ctx.margin + 16,
           y: ctx.y - 9.5,
           size: 9.5,
@@ -257,7 +306,7 @@ export async function generateProposalPdf(
       ensureSpace(26);
 
       // Milestone name and duration
-      ctx.page.drawText(milestone.name, {
+      drawText(milestone.name, {
         x: ctx.margin,
         y: ctx.y - 10,
         size: 10,
@@ -267,8 +316,8 @@ export async function generateProposalPdf(
 
       if (milestone.estimatedDuration) {
         const durText = `Duration: ${milestone.estimatedDuration}`;
-        const durWidth = ctx.fontItalic.widthOfTextAtSize(durText, 9);
-        ctx.page.drawText(durText, {
+        const durWidth = measureText(durText, ctx.fontItalic, 9);
+        drawText(durText, {
           x: ctx.width - ctx.margin - durWidth,
           y: ctx.y - 10,
           size: 9,
@@ -282,7 +331,7 @@ export async function generateProposalPdf(
         const descLines = wrapText(milestone.description, ctx.fontRegular, 9, printableWidth - 10);
         for (const line of descLines) {
           ensureSpace(12);
-          ctx.page.drawText(line, {
+          drawText(line, {
             x: ctx.margin + 10,
             y: ctx.y - 9,
             size: 9,
@@ -303,7 +352,7 @@ export async function generateProposalPdf(
     const pricingLines = wrapText(proposal.pricingSummary, ctx.fontRegular, 9.5, printableWidth);
     for (const line of pricingLines) {
       ensureSpace(13);
-      ctx.page.drawText(line, {
+      drawText(line, {
         x: ctx.margin,
         y: ctx.y - 9.5,
         size: 9.5,
@@ -321,7 +370,7 @@ export async function generateProposalPdf(
     const nextStepLines = wrapText(proposal.nextSteps, ctx.fontRegular, 9.5, printableWidth);
     for (const line of nextStepLines) {
       ensureSpace(13);
-      ctx.page.drawText(line, {
+      drawText(line, {
         x: ctx.margin,
         y: ctx.y - 9.5,
         size: 9.5,
@@ -337,7 +386,7 @@ export async function generateProposalPdf(
   for (let i = 0; i < totalPages; i++) {
     const page = doc.getPage(i);
     const pageNumberStr = `Page ${i + 1} of ${totalPages}`;
-    const pageNumberWidth = fontRegular.widthOfTextAtSize(pageNumberStr, 8.5);
+    const pageNumberWidth = measureText(pageNumberStr, fontRegular, 8.5);
     page.drawText(pageNumberStr, {
       x: width - margin - pageNumberWidth,
       y: margin / 2,
@@ -347,7 +396,7 @@ export async function generateProposalPdf(
     });
 
     const footerDoc = proposal.applicantName || "Proposal Document";
-    page.drawText(footerDoc, {
+    page.drawText(sanitizeForPdf(footerDoc, fontItalic), {
       x: margin,
       y: margin / 2,
       size: 8.5,

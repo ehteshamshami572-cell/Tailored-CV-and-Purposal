@@ -25,6 +25,7 @@ export function getAIConfig(): AIProviderConfig {
   if (!model) {
     if (provider === "gemini") model = "gemini-2.0-flash";
     else if (provider === "anthropic") model = "claude-3-5-sonnet-latest";
+    else if (provider === "groq") model = "llama-3.3-70b-versatile";
     else model = "gpt-4o-mini";
   }
 
@@ -104,22 +105,29 @@ async function callOpenAICompatible(
     endpoint = "https://openrouter.ai/api/v1/chat/completions";
   }
 
+  const requestBody: Record<string, unknown> = {
+    model: config.model,
+    messages: [
+      { role: "system", content: options.systemPrompt },
+      { role: "user", content: sanitizeUntrustedInput(options.userPrompt) },
+    ],
+    temperature: options.temperature ?? 0.3,
+    max_tokens: options.maxTokens ?? 3500,
+    response_format: { type: "json_object" },
+  };
+
+  // For Groq reasoning models like deepseek-r1 or qwq, reasoning_format="hidden" is required when json_object is enabled
+  if (config.provider === "groq" && (config.model.includes("deepseek") || config.model.includes("qwq") || config.model.includes("r1"))) {
+    requestBody.reasoning_format = "hidden";
+  }
+
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.apiKey}`,
     },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        { role: "system", content: options.systemPrompt },
-        { role: "user", content: sanitizeUntrustedInput(options.userPrompt) },
-      ],
-      temperature: options.temperature ?? 0.3,
-      max_tokens: options.maxTokens ?? 3500,
-      response_format: { type: "json_object" },
-    }),
+    body: JSON.stringify(requestBody),
     signal,
   });
 
@@ -204,6 +212,8 @@ async function callAnthropic(
 
 function extractAndParseJson<T>(rawText: string): T {
   let cleaned = rawText.trim();
+  // Strip <think>...</think> reasoning blocks from DeepSeek / Qwen models
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   // Strip ```json markdown code fences if present
   if (cleaned.startsWith("```json")) {
     cleaned = cleaned.replace(/^```json\s*/, "").replace(/\s*```$/, "");
