@@ -17,6 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <meta name="google-site-verification" content="ClEXaiC9vy71-E1vlF2zd-Xc4q1qKNVOlobpVYZbOyw" />
       <body className="min-h-screen flex flex-col font-sans bg-background text-foreground">
         <ToastProvider>
           <Header />
