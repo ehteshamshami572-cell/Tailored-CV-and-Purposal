@@ -18,6 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <meta name="google-site-verification" content="ClEXaiC9vy71-E1vlF2zd-Xc4q1qKNVOlobpVYZbOyw" />
+      <meta name="msvalidate.01" content="4D614D444DCD06CD337A566141DB6B07" />
       <body className="min-h-screen flex flex-col font-sans bg-background text-foreground">
         <ToastProvider>
           <Header />
