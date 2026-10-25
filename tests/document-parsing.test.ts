@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import zlib from "zlib";
 import { parseTextBuffer } from "@/lib/documents/parse-text";
+import { parsePdfBuffer } from "@/lib/documents/parse-pdf";
 import { isAllowedFileType, sanitizeUntrustedInput } from "@/lib/security/sanitize";
 
 describe("Document Parsing & Sanitization Tests", () => {
@@ -36,5 +38,20 @@ describe("Document Parsing & Sanitization Tests", () => {
     expect(cleaned).not.toContain("<|system|>");
     expect(cleaned).not.toContain("<|im_end|>");
     expect(cleaned).toContain("[filtered-delimiter]");
+  });
+
+  it("recovers text from PDF with corrupted or bad XRef entry via raw stream fallback", async () => {
+    const streamContent = "BT /F1 12 Tf 72 712 Td (Abdul Kabir Senior Full Stack Developer Experienced in React Node and Cloud Architecture) Tj ET";
+    const compressed = zlib.deflateSync(Buffer.from(streamContent));
+    const badXRefPdf = Buffer.concat([
+      Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length " + compressed.length + " /Filter /FlateDecode >>\nstream\n"),
+      compressed,
+      Buffer.from("\nendstream\nendobj\nxref\n0 1\n0000000000 65535 f \nbad XRef entry corrupted\ntrailer\n<< /Root 1 0 R >>\nstartxref\n999999\n%%EOF")
+    ]);
+
+    const result = await parsePdfBuffer(badXRefPdf);
+    expect(result.text).toContain("Abdul Kabir");
+    expect(result.text).toContain("Full Stack Developer");
+    expect(result.wordCount).toBeGreaterThan(5);
   });
 });
